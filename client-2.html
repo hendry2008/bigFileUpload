@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <title>upload client</title>
+  </head>
+  <body>
+    <div class="box-border h-screen w-screen bg-gray-50 border-green-700 border-2">
+      <h2 class="w-full text-center py-5 bg-green-200 text-gray-700 font-bold tracking-wider">
+        原生demo -- 分片上传和显示进度
+      </h2>
+      <div class="flex h-32 w-full justify-center items-center text-gray-600">
+        <input upload-file class="border-1 bg-blue-200 rounded mx-3" type="file" />
+        <button
+          upload-button
+          class="mx-3 px-5 py-1 rounded border bg-purple-500 text-gray-200 hover:bg-purple-400 active:bg-purple-600"
+        >
+          upload
+        </button>
+      </div>
+
+      <div id="progress-wrapper" class="h-48 w-full flex flex-col justify-start pl-20">
+        <h5>进度信息</h5>
+      </div>
+    </div>
+
+    <script>
+      const MAX_SIZE = 1024 * 1024
+
+      // container 是用户选择的文件, 因为需要切割成小文件, 所以这个整体文件就类似是原始 container
+      let container
+      // 把大文件Blob数据, 切割成chunkList中的数据, 这个是 Blob api 提供的切割功能
+      // 切割成小文件并上传这个应该是在用户触发按钮点击的时候执行
+      let chunkList = []
+      function handleFileChange(e) {
+        ;[container] = e.target.files
+        console.log('file: >> ', e.target.files)
+      }
+
+      function request({ url, onProgress = (e) => e, method = 'get', data, headers = {} }) {
+        return new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest()
+          Object.keys(headers).forEach((key) => xhr.setRequestHeader(key, headers[key]))
+          // xhr.addEventListener('progress', onProgress )
+          xhr.upload.onprogress = onProgress
+          xhr.onload = (response) => resolve(response)
+          xhr.onerror = (error) => reject(error)
+          xhr.open(method, url, true)
+          xhr.send(data)
+        })
+      }
+
+      function createChunkList(originFile, size = MAX_SIZE) {
+        let _chunkList = []
+        let currentSize = 0
+        while (originFile.size > currentSize) {
+          _chunkList.push(originFile.slice(currentSize, currentSize + size))
+          currentSize += size
+        }
+        return _chunkList
+      }
+
+      const input = document.querySelector('[upload-file]')
+      const uploadBtn = document.querySelector('[upload-button]')
+      input.addEventListener('change', handleFileChange)
+
+      // const onProgress = (e) => console.log('onProgress 1111 :>> ', e)
+      // step 1: 测试能获取到进度
+      // step 2: 测试能根据 chunk index 获取进度 ,也就是每个chunk 上传进度
+      // step 3: 更新每个chunk 的进度条ui
+      // 在进度回调里面, 需要能访问到每个chunk , 这样才能更新到chunk相关的ui
+      const progressWrapper = document.querySelector('#progress-wrapper')
+      const createProgressCallback = (index) => {
+        let dom = initProgressDom(index)
+        return (e) => {
+          console.log(`onProgress ${index}:`, e)
+          const percent = ((e.loaded / e.total) * 100).toFixed(2) + '%'
+          dom.innerHTML = `${index} chunk percent --- ${percent}`
+        }
+      }
+
+      // 初始化progress dom 如果 progress dom 已经存在则直接返回
+      // 不存在则创建并返回该dom
+      const initProgressDom = function (chunkIndex, reset = false) {
+        const domId = `#progress-${chunkIndex}`
+        let dom = document.querySelector(domId)
+        if (!dom) {
+          dom = document.createElement('div')
+          dom.setAttribute('id', `progress-${chunkIndex}`)
+          dom.innerHTML = `chunk ${chunkIndex} waiting to start....`
+          progressWrapper.appendChild(dom)
+        }
+        if (reset) {
+          dom.innerHTML = `chunk ${chunkIndex} waiting to start....`
+        }
+        return dom
+      }
+
+      uploadBtn.addEventListener('click', async () => {
+        if (!container) return
+        chunkList = createChunkList(container)
+        console.log('chunkList', chunkList)
+        // reset progress 
+        chunkList.forEach((_, index) => {
+          initProgressDom(index, true)
+        })
+
+        // 并发请求
+        const uploadRequests = chunkList
+          .map((chunk, index) => {
+            const formData = new FormData()
+            formData.append('chunk', chunk)
+            formData.append('index', index)
+            formData.append('name', container.name)
+            return formData
+          })
+          .map((formData, index) => {
+            return request({
+              url: 'http://localhost:3002/upload',
+              onProgress: createProgressCallback(index),
+              method: 'post',
+              data: formData,
+            })
+          })
+
+        await Promise.all(uploadRequests)
+      })
+    </script>
+  </body>
+</html>

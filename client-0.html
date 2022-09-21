@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <title>upload client</title>
+  </head>
+  <body>
+    <div id="app">
+      <div class="box-border h-screen w-screen bg-gray-50 border-green-700 border-2">
+        <h2 class="w-full text-center py-5 bg-green-200 text-gray-700 font-bold tracking-wider">{{ message }}</h2>
+        <div class="flex h-96 w-full justify-center items-center text-gray-600">
+          <input class="border-1 bg-blue-200 rounded mx-3" type="file" @change="handleFileChange" />
+          <button
+            @click="upload"
+            class="mx-3 px-5 py-1 rounded border bg-purple-500 text-gray-200 hover:bg-purple-400 active:bg-purple-600"
+          >
+            upload
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- <script src="https://cdn.staticfile.org/vue/2.7.6/vue.min.js"></script> -->
+
+    <script src="https://cdn.staticfile.org/vue/3.2.39/vue.global.min.js"></script>
+    <script>
+      const { createApp, ref } = Vue
+
+      const MAX_SIZE = 1024 * 1024
+      createApp({
+        setup(props) {
+          const message = ref('upload client , 分片demo')
+          // 用户上传的文件对象, 整个文件就好比是个容器
+          // 需要注意的是, 这个是个文件对象, 是浏览器提供的文件对象, 有一些api方法
+          let container = null
+          // 文件切片, 每个部分都保存在该数组中
+          const fileChunkList = []
+          const handleFileChange = (e) => {
+            ;[container] = e.target.files
+            console.log('files :>> ', e.target.files, 'container file: ', container)
+            // console.log('e :>> ', e)
+            // console.log('container', container.value, "typeof :" , typeof container.value)
+            // console.log('file slice', container.value.slice())
+          }
+          const upload = () => {
+            if (!container) return
+            let start = 0
+            // 当slice 超出范围的时候, 返回的 blob 对象的size 是0 
+            while (container.slice(start * MAX_SIZE, (start + 1) * MAX_SIZE).size > 0) {
+              const chunk = container.slice(start * MAX_SIZE, (start + 1) * MAX_SIZE)
+              fileChunkList.push(chunk)
+              start++
+              console.log('upload :>> ')
+            }
+            console.log('fileChunkList :>> ', fileChunkList)
+          }
+          return { handleFileChange, message, upload }
+        },
+      }).mount('#app')
+    </script>
+  </body>
+</html>

@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <title>upload client</title>
+  </head>
+  <body>
+    <div class="box-border h-screen w-screen bg-gray-50 border-green-700 border-2">
+      <h2 class="w-full text-center py-5 bg-green-200 text-gray-700 font-bold tracking-wider">
+        原生demo -- 分片上传
+      </h2>
+      <div class="flex h-32 w-full justify-center items-center text-gray-600">
+        <input upload-file class="border-1 bg-blue-200 rounded mx-3" type="file" />
+        <button
+          upload-button
+          class="mx-3 px-5 py-1 rounded border bg-purple-500 text-gray-200 hover:bg-purple-400 active:bg-purple-600"
+        >
+          upload
+        </button>
+      </div>
+
+      <div id="progress-wrapper" class="h-48 w-full flex flex-col justify-start pl-20">
+        <h5>进度信息</h5>
+      </div>
+    </div>
+
+    <script>
+      const MAX_SIZE = 1024 * 1024 // byte
+
+      // 获取用户选择的文件
+      let container
+      let chunkList = []
+      const input = document.querySelector('[upload-file]')
+      const button = document.querySelector('[upload-button]')
+      input.addEventListener('change', function (e) {
+        ;[container] = e.target.files
+      })
+      // 创建分片
+      button.addEventListener('click', async function () {
+        if (!container) return
+        chunkList = createChunkList()
+        console.log('chunkList :>> ', chunkList)
+      // 并发请求
+        const requests = chunkList
+          .map((chunk, index) => {
+            // 组装需要发送到server的数据, 比如 chunk 需要index 发送到服务器端作为组装时候的切片顺序
+            // 并且上传文件只能用formData
+            const formData = new FormData()
+            formData.append('name', container.name)
+            formData.append('index', index)
+            formData.append('chunk', chunk)
+            return formData
+          })
+          .map((formData) => {
+            return request({
+              url: uploadUrl,
+              method: 'post',
+              data: formData,
+            })
+          })
+        await Promise.all(requests)
+      })
+
+      function createChunkList(size = MAX_SIZE) {
+        let currentSize = 0
+        let _chunkList = []
+        while (currentSize < container.size) {
+          const blob = container.slice(currentSize, currentSize + size)
+          _chunkList.push(blob)
+          currentSize += size
+        }
+        return _chunkList
+      }
+
+      const request = function ({ url, method, data, headers = {} }) {
+        return new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest()
+          Object.keys(headers).forEach((key) => xhr.setRequestHeader(key, headers[key]))
+          xhr.onload = (e) => resolve(e)
+          xhr.error = (error) => reject(error)
+          xhr.open(method, url)
+          xhr.send(data)
+        })
+      }
+
+      const uploadUrl = 'http://localhost:3002/upload'
+
+      // test request
+      request({ url: 'http://localhost:3002/', method: 'get' }).then((event) => {
+        // console.log('test response :>> ', event)
+        const { status, response } = event.currentTarget
+        console.log(`test request, status : ${status}, response: ${response}`)
+      })
+    </script>
+  </body>
+</html>

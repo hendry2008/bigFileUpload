@@ -1,0 +1,11 @@
+{
+  "name": "bigfileUpload",
+  "version": "1.0.0",
+  "main": "index.js",
+  "author": "hendry2008 <ruiqingzheng@hotmail.com>",
+  "license": "MIT",
+  "dependencies": {
+    "fs-extra": "^10.1.0",
+    "multiparty": "^4.2.3"
+  }
+}
