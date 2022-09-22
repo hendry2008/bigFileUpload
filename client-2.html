@@ -29,15 +29,19 @@
 
     <script>
       const MAX_SIZE = 1024 * 1024
+      const UPLOAD_URL = `http://localhost:3002/upload`
+      const NOTIFY_MERGE_URL = `http://localhost:3002/merge`
 
       // container 是用户选择的文件, 因为需要切割成小文件, 所以这个整体文件就类似是原始 container
       let container
+      let uploadId
       // 把大文件Blob数据, 切割成chunkList中的数据, 这个是 Blob api 提供的切割功能
       // 切割成小文件并上传这个应该是在用户触发按钮点击的时候执行
       let chunkList = []
       function handleFileChange(e) {
         ;[container] = e.target.files
-        console.log('file: >> ', e.target.files)
+        uploadId = generateUploadId()
+        console.log('file: >> ', e.target.files, 'uploadId:', uploadId)
       }
 
       function request({ url, onProgress = (e) => e, method = 'get', data, headers = {} }) {
@@ -57,8 +61,9 @@
         let _chunkList = []
         let currentSize = 0
         while (originFile.size > currentSize) {
-          _chunkList.push(originFile.slice(currentSize, currentSize + size))
-          currentSize += size
+          const _chunk = originFile.slice(currentSize, currentSize + size)
+          _chunkList.push(_chunk)
+          currentSize += _chunk.size
         }
         return _chunkList
       }
@@ -66,6 +71,40 @@
       const input = document.querySelector('[upload-file]')
       const uploadBtn = document.querySelector('[upload-button]')
       input.addEventListener('change', handleFileChange)
+      let chunkListPercent = {}
+      let updateAllUploadedPercent = (index, loaded, total) => {
+        let allLoaded = 0
+        let allTotal = 0
+
+        console.log(`${index} -- loaded: ${loaded} , total: ${total} `)
+
+        chunkListPercent[index] = { loaded, total }
+
+        Object.keys(chunkListPercent).forEach((_index) => {
+          allTotal += chunkListPercent[_index].total
+          allLoaded += chunkListPercent[_index].loaded
+        })
+
+        let result = allTotal === 0 ? 0 : allLoaded / allTotal
+
+        // 因为浏览器默认6个并发上传请求, 所以这里统计的是这6个请求的完成进度
+        // 而不是所有的 chunk 的完成进度, 所以 result ===1 只是这6个上传请求都100%完成了
+        // 而且这里可以发现 源文件的大小 和 上传的统计的总的大小是有出入的
+        // 当所有的 chunk 都统计了 且完成了, 则可以通知服务器端开始合并
+        if (result === 1 && Object.keys(chunkListPercent).length === chunkList.length) {
+          console.log(`allTotal: ${allTotal}, container file size: ${container.size}`)
+          
+          request({
+            url: NOTIFY_MERGE_URL + `?uploadId=${uploadId}`,
+            method: 'get',
+            // data: {
+            //   uploadId: uploadId,
+            // },
+          })
+        }
+        // console.log('result :>> ', result);
+        return result
+      }
 
       // const onProgress = (e) => console.log('onProgress 1111 :>> ', e)
       // step 1: 测试能获取到进度
@@ -78,7 +117,8 @@
         return (e) => {
           console.log(`onProgress ${index}:`, e)
           const percent = ((e.loaded / e.total) * 100).toFixed(2) + '%'
-          dom.innerHTML = `${index} chunk percent --- ${percent}`
+          const totalPercent = updateAllUploadedPercent(index, e.loaded, e.total)
+          dom.innerHTML = `${index} chunk percent --- ${percent} -- total percent ${totalPercent}`
         }
       }
 
@@ -98,28 +138,57 @@
         }
         return dom
       }
+      const randStr = new Date().getTime().toString()
+      const generateUploadId = function () {
+        return container.name + '|' + randStr
+      }
 
       uploadBtn.addEventListener('click', async () => {
         if (!container) return
         chunkList = createChunkList(container)
         console.log('chunkList', chunkList)
-        // reset progress 
+        // reset progress
         chunkList.forEach((_, index) => {
           initProgressDom(index, true)
         })
 
         // 并发请求
+        // const formDataList = []
+        // for (let index = 0; index < chunkList.length; index++) {
+        //   const formData = new FormData()
+        //   const chunk = chunkList[index]
+        //   formData.append('chunk', chunk)
+        //   formData.append('index', index)
+        //   formData.append('name', container.name)
+        //   formDataList.push(formData)
+        // }
+
+        // const requestList = []
+        // for (let index = 0; index < formDataList.length; index++) {
+        //   const formData = formDataList[index]
+        //   requestList.push(
+        //     request({
+        //       url: 'http://localhost:3002/upload',
+        //       onProgress: createProgressCallback(index),
+        //       method: 'post',
+        //       data: formData,
+        //     })
+        //   )
+        // }
+        // await Promise.all(requestList)
+
         const uploadRequests = chunkList
           .map((chunk, index) => {
             const formData = new FormData()
             formData.append('chunk', chunk)
             formData.append('index', index)
             formData.append('name', container.name)
+            formData.append('uploadId', uploadId)
             return formData
           })
           .map((formData, index) => {
             return request({
-              url: 'http://localhost:3002/upload',
+              url: UPLOAD_URL,
               onProgress: createProgressCallback(index),
               method: 'post',
               data: formData,
@@ -127,6 +196,8 @@
           })
 
         await Promise.all(uploadRequests)
+
+        // 当并发请求上传完毕才能通知服务器可以进行合并文件了
       })
     </script>
   </body>
