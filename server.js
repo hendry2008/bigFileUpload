@@ -65,7 +65,6 @@ server.on('request', (req, res) => {
   }
 
   if (method === 'get' && url === '/merge') {
-    console.log('req.query :>> ', req)
     // 从url 获取参数
     const params = {}
     const paramsString = req.url.includes('?') ? req.url.split('?')[1] : ''
@@ -78,7 +77,7 @@ server.on('request', (req, res) => {
     const { uploadId } = params
     const chunks = uploadSessions[uploadId]
     const originFileName = uploadId.split('|')[0]
-    mergeDataFileEnd(chunks, originFileName)
+    mergeDataFileEnd(chunks, originFileName, uploadId)
     res.statusCode = 200
     res.setHeader('Content-Type', 'text/html')
     res.write(`merge, ${JSON.stringify(params)}`)
@@ -97,7 +96,7 @@ server.on('request', (req, res) => {
  * @description 合并, 逐个读取chunk 写入到目标文件的末尾 
  */
 
-function mergeDataFileEnd(chunkPathList, distFile) {
+function mergeDataFileEnd(chunkPathList, distFile, uploadId) {
   const distFileFullPath = path.resolve(__dirname, UPLOAD_DIR, distFile)
   const _writeStream = fs.createWriteStream(distFileFullPath)
   let _currentChunkIndex = 0
@@ -116,6 +115,12 @@ function mergeDataFileEnd(chunkPathList, distFile) {
     readStream.on('end', () => {
       if (currentChunkIndex === chunkPathList.length - 1) {
         writeStream.end()
+        // 删除chunkList这些临时文件
+        chunkPathList.forEach(chunk => {
+          fs.unlinkSync(chunk)
+        })
+        // 清除 uploadSession 中的这个上传记录
+        delete uploadSessions[uploadId]
         return
       } else {
         _currentChunkIndex += 1
