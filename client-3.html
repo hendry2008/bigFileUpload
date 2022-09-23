@@ -38,8 +38,6 @@
       // 把大文件Blob数据, 切割成chunkList中的数据, 这个是 Blob api 提供的切割功能
       // 切割成小文件并上传这个应该是在用户触发按钮点击的时候执行
       let chunkList = []
-      let chunkUploadedSizeList = []
-
       function handleFileChange(e) {
         ;[container] = e.target.files
         uploadId = generateUploadId()
@@ -73,20 +71,30 @@
       const input = document.querySelector('[upload-file]')
       const uploadBtn = document.querySelector('[upload-button]')
       input.addEventListener('change', handleFileChange)
+      let chunkListPercent = {}
+      let updateAllUploadedPercent = (index, loaded, total) => {
+        let allLoaded = 0
+        let allTotal = 0
 
-      // 而且这里可以发现 源文件的大小 和 上传的统计的总的大小是有出入的
-      // 当所有的 chunk 都统计了 且完成了, 则可以通知服务器端开始合并
-      const updateTotalLoadedPercent = (index, loaded) => {
-        if(!loaded) return 
-        chunkUploadedSizeList[index] = loaded
-        console.log('chunkListPercent', chunkUploadedSizeList)
-        let totalLoaded = 0
-        for (let _loaded of chunkUploadedSizeList) {
-          totalLoaded += _loaded
-        }
-        const totalLoadedPercent = (totalLoaded / container.size).toFixed(2)
+        console.log(`${index} -- loaded: ${loaded} , total: ${total} `)
 
-        if (totalLoadedPercent >= 1 && chunkUploadedSizeList.length === chunkList.length) {
+        chunkListPercent[index] = { loaded, total }
+
+        Object.keys(chunkListPercent).forEach((_index) => {
+          allTotal += chunkListPercent[_index].total
+          allLoaded += chunkListPercent[_index].loaded
+        })
+
+        let result = allTotal === 0 ? 0 : allLoaded / allTotal
+
+        // 因为浏览器默认6个并发上传请求, 所以这里统计的是这6个请求的完成进度
+        // 而不是所有的 chunk 的完成进度, 所以 result ===1 只是这6个上传请求都100%完成了
+        // 而且这里可以发现 源文件的大小 和 上传的统计的总的大小是有出入的
+        // 当所有的 chunk 都统计了 且完成了, 则可以通知服务器端开始合并
+        if (result === 1 && Object.keys(chunkListPercent).length === chunkList.length) {
+          console.log(`allTotal: ${allTotal}, container file size: ${container.size}`)
+          
+        // 当并发请求上传完毕才能通知服务器可以进行合并文件了
           request({
             url: NOTIFY_MERGE_URL + `?uploadId=${uploadId}`,
             method: 'get',
@@ -95,9 +103,9 @@
             // },
           })
         }
-        return totalLoadedPercent
+        // console.log('result :>> ', result);
+        return result
       }
-
 
       // const onProgress = (e) => console.log('onProgress 1111 :>> ', e)
       // step 1: 测试能获取到进度
@@ -110,7 +118,7 @@
         return (e) => {
           console.log(`onProgress ${index}:`, e)
           const percent = ((e.loaded / e.total) * 100).toFixed(2) + '%'
-          const totalPercent = updateTotalLoadedPercent(index, e.loaded)
+          const totalPercent = updateAllUploadedPercent(index, e.loaded, e.total)
           dom.innerHTML = `${index} chunk percent --- ${percent} -- total percent ${totalPercent}`
         }
       }
@@ -144,8 +152,8 @@
         chunkList.forEach((_, index) => {
           initProgressDom(index, true)
         })
-        chunkUploadedSizeList = []
 
+        // 并发请求
 
         const uploadRequests = chunkList
           .map((chunk, index) => {
@@ -167,7 +175,6 @@
 
         await Promise.all(uploadRequests)
 
-        // 当并发请求上传完毕才能通知服务器可以进行合并文件了
       })
     </script>
   </body>

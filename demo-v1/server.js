@@ -4,7 +4,6 @@ const multiparty = require('multiparty')
 const fs = require('fs')
 // const fs = require('fs-extra')
 const path = require('path')
-const { resolve } = require('path')
 const UPLOAD_DIR = 'upload'
 
 
@@ -12,7 +11,7 @@ const server = http.createServer()
 
 const uploadSessions = {}
 
-server.on('request',async (req, res) => {
+server.on('request', (req, res) => {
   res.setHeader('Access-control-allow-origin', '*')
   res.setHeader('Access-control-allow-headers', '*')
   if (req.method.toLocaleLowerCase() === 'options') {
@@ -76,11 +75,6 @@ server.on('request',async (req, res) => {
     })
 
     const { uploadId } = params
-    // 当上传很小的文件的时候, 可能会先处理 merge, 还没有来得及运行 multiParty.parse 方法, 
-    // 于是这里 uploadSessions[uploadId] 可能还是 undefined , 所以需要给 chunks 默认为空数组
-    // 或者sleep 很短时间确保在极端快上传的情况下, merge 运行一定能读取到 parse 处理后的变量
-    await sleep(500)
-    // const chunks = uploadSessions[uploadId] || []
     const chunks = uploadSessions[uploadId]
     const originFileName = uploadId.split('|')[0]
     mergeDataFileEnd(chunks, originFileName, uploadId)
@@ -143,9 +137,4 @@ server.on('clientError', (err, socket) => {
   socket.end(`HTTP/1.1 400 Bad Request, ${err}\r\n\r\n`)
 })
 
-async function sleep(milSeconds) {
-  return new Promise((resolve) => {
-    setTimeout(() => resolve(), milSeconds)
-  })
-}
 server.listen(3002, () => console.log('Server listening on port 3002'))
