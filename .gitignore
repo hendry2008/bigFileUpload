@@ -1,3 +1,5 @@
 ./upload/*
 upload/
 .gitignore
+chunks/
+.*

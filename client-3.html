@@ -22,37 +22,41 @@
         </button>
       </div>
 
-      <div id="progress-wrapper" class="h-48 w-full flex flex-col justify-start pl-20">
+      <div class="h-48 w-full flex flex-col justify-start pl-20">
         <h5>进度信息</h5>
+        <div id="progress-wrapper"></div>
       </div>
     </div>
 
     <script>
-      const MAX_SIZE = 1024 * 1024
+      const MAX_SIZE = 1024 * 100
       const UPLOAD_URL = `http://localhost:3002/upload`
       const NOTIFY_MERGE_URL = `http://localhost:3002/merge`
+      const IS_NEED_UPLOAD_URL = `http://localhost:3002/should-upload`
+
+      const worker = new Worker('./worker-hash.js')
 
       // container 是用户选择的文件, 因为需要切割成小文件, 所以这个整体文件就类似是原始 container
       let container
-      let uploadId
+      let fileHash
       // 把大文件Blob数据, 切割成chunkList中的数据, 这个是 Blob api 提供的切割功能
       // 切割成小文件并上传这个应该是在用户触发按钮点击的时候执行
       let chunkList = []
+      let chunkUploadedSizeList = []
+
       function handleFileChange(e) {
         ;[container] = e.target.files
-        uploadId = generateUploadId()
-        console.log('file: >> ', e.target.files, 'uploadId:', uploadId)
       }
 
       function request({ url, onProgress = (e) => e, method = 'get', data, headers = {} }) {
         return new Promise((resolve, reject) => {
           const xhr = new XMLHttpRequest()
-          Object.keys(headers).forEach((key) => xhr.setRequestHeader(key, headers[key]))
           // xhr.addEventListener('progress', onProgress )
           xhr.upload.onprogress = onProgress
           xhr.onload = (response) => resolve(response)
           xhr.onerror = (error) => reject(error)
           xhr.open(method, url, true)
+          Object.keys(headers).forEach((key) => xhr.setRequestHeader(key, headers[key]))
           xhr.send(data)
         })
       }
@@ -71,40 +75,28 @@
       const input = document.querySelector('[upload-file]')
       const uploadBtn = document.querySelector('[upload-button]')
       input.addEventListener('change', handleFileChange)
-      let chunkListPercent = {}
-      let updateAllUploadedPercent = (index, loaded, total) => {
-        let allLoaded = 0
-        let allTotal = 0
 
-        console.log(`${index} -- loaded: ${loaded} , total: ${total} `)
+      // 而且这里可以发现 源文件的大小 和 上传的统计的总的大小是有出入的
+      // 当所有的 chunk 都统计了 且完成了, 则可以通知服务器端开始合并
+      // 合并的时候, 需要提交hash , 还有文件名
+      const updateTotalLoadedPercent = (index, loaded) => {
+        // TODO : loaded 有的时候返回的是空
+        chunkUploadedSizeList[index] = loaded || 0
+        console.log('chunkListPercent', chunkUploadedSizeList)
+        let totalLoaded = 0
+        for (let _loaded of chunkUploadedSizeList) {
+          // FIXED  有时这个统计数组中是空值, undefined 直接计算得到的结果则是NaN, 所以需要判断undefined的话则按0来计算
+          totalLoaded += _loaded ? _loaded : 0
+        }
+        const totalLoadedPercent = (totalLoaded / container.size).toFixed(2)
 
-        chunkListPercent[index] = { loaded, total }
-
-        Object.keys(chunkListPercent).forEach((_index) => {
-          allTotal += chunkListPercent[_index].total
-          allLoaded += chunkListPercent[_index].loaded
-        })
-
-        let result = allTotal === 0 ? 0 : allLoaded / allTotal
-
-        // 因为浏览器默认6个并发上传请求, 所以这里统计的是这6个请求的完成进度
-        // 而不是所有的 chunk 的完成进度, 所以 result ===1 只是这6个上传请求都100%完成了
-        // 而且这里可以发现 源文件的大小 和 上传的统计的总的大小是有出入的
-        // 当所有的 chunk 都统计了 且完成了, 则可以通知服务器端开始合并
-        if (result === 1 && Object.keys(chunkListPercent).length === chunkList.length) {
-          console.log(`allTotal: ${allTotal}, container file size: ${container.size}`)
-          
-        // 当并发请求上传完毕才能通知服务器可以进行合并文件了
+        if (totalLoadedPercent >= 1 && chunkUploadedSizeList.length === chunkList.length) {
           request({
-            url: NOTIFY_MERGE_URL + `?uploadId=${uploadId}`,
+            url: NOTIFY_MERGE_URL + `?hash=${fileHash}&name=${container.name}`,
             method: 'get',
-            // data: {
-            //   uploadId: uploadId,
-            // },
           })
         }
-        // console.log('result :>> ', result);
-        return result
+        return totalLoadedPercent
       }
 
       // const onProgress = (e) => console.log('onProgress 1111 :>> ', e)
@@ -112,69 +104,146 @@
       // step 2: 测试能根据 chunk index 获取进度 ,也就是每个chunk 上传进度
       // step 3: 更新每个chunk 的进度条ui
       // 在进度回调里面, 需要能访问到每个chunk , 这样才能更新到chunk相关的ui
-      const progressWrapper = document.querySelector('#progress-wrapper')
+      let progressWrapper = document.querySelector('#progress-wrapper')
       const createProgressCallback = (index) => {
-        let dom = initProgressDom(index)
         return (e) => {
           console.log(`onProgress ${index}:`, e)
-          const percent = ((e.loaded / e.total) * 100).toFixed(2) + '%'
-          const totalPercent = updateAllUploadedPercent(index, e.loaded, e.total)
-          dom.innerHTML = `${index} chunk percent --- ${percent} -- total percent ${totalPercent}`
+          const _loaded = e.loaded || 0
+          const percent = _loaded > 0 ? ((_loaded / e.total) * 100).toFixed(2) + '%' : 0
+          const totalPercent = updateTotalLoadedPercent(index, _loaded)
+          updateProgressBar(index, percent, totalPercent)
         }
       }
 
-      // 初始化progress dom 如果 progress dom 已经存在则直接返回
-      // 不存在则创建并返回该dom
-      const initProgressDom = function (chunkIndex, reset = false) {
-        const domId = `#progress-${chunkIndex}`
-        let dom = document.querySelector(domId)
-        if (!dom) {
-          dom = document.createElement('div')
-          dom.setAttribute('id', `progress-${chunkIndex}`)
-          dom.innerHTML = `chunk ${chunkIndex} waiting to start....`
-          progressWrapper.appendChild(dom)
+      const updateProgressBar = function (index, percent, totalPercent) {
+        let dom = getProgressDom(index)
+        dom.innerHTML = `${index} chunk percent --- ${percent} -- total percent ${totalPercent}`
+      }
+
+      // 根据 chunkList 的大小, 来构建每个分片的 progress dom
+      // 确保后续querySelector 需要获取进度条的时候都能正常获取dom
+      // progress dom 的 id 格式是固定的
+      const _initProcessDom = function () {
+        const size = chunkList.length
+
+        const parent = progressWrapper.parentElement
+        parent.removeChild(progressWrapper)
+        const div = document.createElement('div')
+        div.setAttribute('id', 'progress-wrapper')
+        parent.appendChild(div)
+        progressWrapper = div
+
+
+        // console.log('progressWrapper.childNodes', progressWrapper.childNodes)
+        // progressWrapper.childNodes.forEach((dom, index) => {
+        //   // progressWrapper.removeChild(progressWrapper.childNodes[index])
+        //   progressWrapper.removeChild(dom)
+        //   // if (dom) dom.remove()
+        //   // dom.remove()
+        // })
+
+        // return
+
+        for (let chunkIndex = 0; chunkIndex < size; chunkIndex++) {
+          const domId = `#progress-${chunkIndex}`
+          let dom = document.querySelector(domId)
+          const initString = `chunk ${chunkIndex} waiting to start....`
+          if (!dom) {
+            dom = document.createElement('div')
+            dom.setAttribute('id', `progress-${chunkIndex}`)
+            progressWrapper.appendChild(dom)
+          }
+          dom.innerHTML = initString
         }
-        if (reset) {
-          dom.innerHTML = `chunk ${chunkIndex} waiting to start....`
-        }
+      }
+
+      // 获取相应的进度条dom
+      const getProgressDom = function (index) {
+        const id = `#progress-${index}`
+        const dom = document.querySelector(id)
         return dom
       }
       const randStr = new Date().getTime().toString()
-      const generateUploadId = function () {
-        return container.name + '|' + randStr
+
+      const shouldUpload = async function (chunkName, hash, index) {
+        try {
+          let result = false
+          // TODO: 上传之前检查是否需要上传
+          const _data = JSON.stringify({
+            chunkName,
+            hash,
+            index,
+          })
+          const _response = await request({
+            url: IS_NEED_UPLOAD_URL,
+            method: 'post',
+            data: _data,
+            headers: {
+              'Content-type': 'application/json',
+            },
+          })
+
+          if (_response.target.status === 200) {
+            result = JSON.parse(_response.target.response.toString()).should
+            // console.log('1111111 response', _response, 'should result: ', result)
+            return result
+          }
+          return result
+        } catch (error) {
+          console.errors('error :>> ', error)
+        }
       }
 
+      // 处理点击上传
       uploadBtn.addEventListener('click', async () => {
         if (!container) return
         chunkList = createChunkList(container)
-        console.log('chunkList', chunkList)
-        // reset progress
-        chunkList.forEach((_, index) => {
-          initProgressDom(index, true)
-        })
+        _initProcessDom()
+        // console.log('chunkList', chunkList)
+        // 当分片完成则开始计算hash
+        worker.postMessage(chunkList)
 
-        // 并发请求
+        worker.onmessage = async (e) => {
+          console.log('worker hash result: ', e.data)
+          fileHash = e.data
+          // reset progress
+          // 上传之前重置进度条
+          chunkUploadedSizeList = []
+          // 上传分片的时候, 需要带上hash
+          // 所以上传的代码需要放到 hash 计算出来的回调中
 
-        const uploadRequests = chunkList
-          .map((chunk, index) => {
-            const formData = new FormData()
-            formData.append('chunk', chunk)
-            formData.append('index', index)
-            formData.append('name', container.name)
-            formData.append('uploadId', uploadId)
-            return formData
-          })
-          .map((formData, index) => {
-            return request({
-              url: UPLOAD_URL,
-              onProgress: createProgressCallback(index),
-              method: 'post',
-              data: formData,
+          const uploadRequests = chunkList
+            .map((chunk, index) => {
+              const formData = new FormData()
+              formData.append('chunk', chunk)
+              formData.append('index', index)
+              formData.append('name', container.name)
+              formData.append('hash', fileHash)
+              return formData
             })
-          })
+            .map(async (formData, index) => {
+              // 先判断是否需要重新上传
+              console.log(`checking should upload chunk ${index} ...`)
+              const should = await shouldUpload(`${fileHash}-${index}`, fileHash, index)
+              console.log(`chunk ${index} should:>> `, should)
+              // 如果需要上传则request, 否则则认为这个切片已经上传, 直接更新进度条
+              if (should) {
+                return request({
+                  url: UPLOAD_URL,
+                  onProgress: createProgressCallback(index),
+                  method: 'post',
+                  data: formData,
+                })
+              } else {
+                const totalPercent = updateTotalLoadedPercent(index, chunkList[index].size)
+                // 设置这个分片为100完成, 并将这个分片大小算为完成, 计算总完成进度
+                updateProgressBar(index, '100%', totalPercent)
+              }
+            })
+          await Promise.all(uploadRequests)
+        }
 
-        await Promise.all(uploadRequests)
-
+        // 当并发请求上传完毕才能通知服务器可以进行合并文件了
       })
     </script>
   </body>

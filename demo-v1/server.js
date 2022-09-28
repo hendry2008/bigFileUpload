@@ -4,6 +4,7 @@ const multiparty = require('multiparty')
 const fs = require('fs')
 // const fs = require('fs-extra')
 const path = require('path')
+const { resolve } = require('path')
 const UPLOAD_DIR = 'upload'
 
 
@@ -11,7 +12,7 @@ const server = http.createServer()
 
 const uploadSessions = {}
 
-server.on('request', (req, res) => {
+server.on('request',async (req, res) => {
   res.setHeader('Access-control-allow-origin', '*')
   res.setHeader('Access-control-allow-headers', '*')
   if (req.method.toLocaleLowerCase() === 'options') {
@@ -33,6 +34,9 @@ server.on('request', (req, res) => {
     return
   }
 
+  /***
+   * @description 上传的分片和字段的处理
+   */
   if (method === 'post' && url === '/upload') {
     // multiparty 处理上传的 form-data
     const form = new multiparty.Form()
@@ -64,6 +68,10 @@ server.on('request', (req, res) => {
     return
   }
 
+  /***
+   * @description 客户端合请求merge 则合并分片
+   */
+
   if (method === 'get' && url === '/merge') {
     // 从url 获取参数
     const params = {}
@@ -75,7 +83,15 @@ server.on('request', (req, res) => {
     })
 
     const { uploadId } = params
-    const chunks = uploadSessions[uploadId]
+    // FIXED 
+    // 当上传很小的文件的时候, 可能会先处理 merge, 还没有来得及运行 multiParty.parse 方法, 
+    // 于是这里 uploadSessions[uploadId] 可能还是 undefined , 
+    // 所以需要给 chunks 默认为空数组
+    // 或者sleep 很短时间确保在极端快上传的情况下, merge 运行一定能读取到 parse 处理后的变量
+    // 这里是两种保障都使用
+    await sleep(500)
+    const chunks = uploadSessions[uploadId] || []
+    // const chunks = uploadSessions[uploadId]
     const originFileName = uploadId.split('|')[0]
     mergeDataFileEnd(chunks, originFileName, uploadId)
     res.statusCode = 200
@@ -137,4 +153,9 @@ server.on('clientError', (err, socket) => {
   socket.end(`HTTP/1.1 400 Bad Request, ${err}\r\n\r\n`)
 })
 
+async function sleep(milSeconds) {
+  return new Promise((resolve) => {
+    setTimeout(() => resolve(), milSeconds)
+  })
+}
 server.listen(3002, () => console.log('Server listening on port 3002'))
