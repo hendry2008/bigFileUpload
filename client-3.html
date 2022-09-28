@@ -80,7 +80,6 @@
       // 当所有的 chunk 都统计了 且完成了, 则可以通知服务器端开始合并
       // 合并的时候, 需要提交hash , 还有文件名
       const updateTotalLoadedPercent = (index, loaded) => {
-        // TODO : loaded 有的时候返回的是空
         chunkUploadedSizeList[index] = loaded || 0
         console.log('chunkListPercent', chunkUploadedSizeList)
         let totalLoaded = 0
@@ -168,7 +167,6 @@
       const shouldUpload = async function (chunkName, hash, index) {
         try {
           let result = false
-          // TODO: 上传之前检查是否需要上传
           const _data = JSON.stringify({
             chunkName,
             hash,
@@ -178,9 +176,9 @@
             url: IS_NEED_UPLOAD_URL,
             method: 'post',
             data: _data,
-            headers: {
-              'Content-type': 'application/json',
-            },
+            // headers: {
+            //   'Content-type': 'application/json',
+            // },
           })
 
           if (_response.target.status === 200) {

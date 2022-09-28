@@ -208,7 +208,7 @@ const mergeChunks = (hash, distName) => {
     if (stat.isFile()) {
       const readStream = fs.createReadStream(chunk)
       readStream.pipe(writeStream, { end: false })
-      // TODO 合并完成还需要删除分片目录吗?  但分片目录是用来判断是否需要上传的, 所以不按理是不应该删除分片存放目录的, 但那样会很占用空间
+      // TODO 合并完成还需要删除分片目录吗?  但分片目录是用来判断是否需要上传的, 所以按理是不应该删除分片存放目录的, 但那样会很占用空间
       
       readStream.on('end', () => {
         if (currentChunkIndex === chunksLength - 1) {
